@@ -1,0 +1,107 @@
+service: stripe-integration
+
+custom:
+  stage: ${opt:stage, self:provider.stage}
+  eventBus: arn:aws:events:us-east-1:779089996899:event-bus/ncent-${opt:stage}
+  authorizer: ${ssm:/ncnt/${opt:stage}/authorizer}
+
+provider:
+  name: aws
+  runtime: go1.x
+  region: ${opt:region, 'us-west-2'}
+  iamRoleStatements:
+    - Effect: "Allow"
+      Resource: "*"
+      Action:
+        - "events:*"
+        - "logs:*"
+  environment:
+    STAGE: ${opt:stage}
+    EVENT_BUS_NAME: ncent-${opt:stage}
+    WEBHOOK_SECRET: ${opt:webhook_secret}
+    STRIPE_KEY: ${opt:stripe_key}
+    DEFAULT_PLAN: ${opt:default_plan}
+    SUCCESS_URL: ${opt:success_url}
+    CANCEL_URL: ${opt:cancel_url}
+
+functions:
+  stripe-webhook:
+    handler: bin/stripe-webhook
+    events:
+      - http:
+          path: /webhook
+          method: post
+          cors: true
+
+  stripe-subscription:
+    handler: bin/stripe-subscription
+    events:
+      - http:
+          path: /subscription
+          method: post
+          authorizer: ${self:custom.authorizer}
+          cors: true
+
+  stripe-cancel:
+    handler: bin/stripe-cancel
+    events:
+      - http:
+          path: /cancel
+          method: post
+          authorizer: ${self:custom.authorizer}
+          cors: true
+
+  stripe-checkout-session:
+    handler: bin/stripe-checkout-session
+    events:
+      - http:
+          path: /checkout-session
+          method: post
+          authorizer: ${self:custom.authorizer}
+          cors: true
+
+  stripe-get-checkout-session:
+    handler: bin/stripe-get-checkout-session
+    events:
+      - http:
+          path: /checkout-session
+          method: get
+          authorizer: ${self:custom.authorizer}
+          cors: true
+
+  create-subscription:
+    handler: bin/create-subscription
+    events:
+      - eventBridge:
+          eventBus: ${self:custom.eventBus}
+          pattern:
+            source:
+              - ${opt:stage}.webhook.stripe
+            detail-type:
+              - checkout.session.completed
+
+resources:
+  Resources:
+    GatewayResponseDefault4XX:
+      Type: "AWS::ApiGateway::GatewayResponse"
+      Properties:
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+        ResponseType: DEFAULT_4XX
+        RestApiId:
+          Ref: "ApiGatewayRestApi"
+    GatewayResponseDefault5XX:
+      Type: "AWS::ApiGateway::GatewayResponse"
+      Properties:
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+        ResponseType: DEFAULT_5XX
+        RestApiId:
+          Ref: "ApiGatewayRestApi"
+package:
+  exclude:
+    - ./**
+  include:
+    - ./bin/**
